@@ -348,9 +348,100 @@ All tools use automatic resource allocation:
 - SuperCollider (scsynth and sclang) installed on system
 - Optional: Running SuperCollider server for discovery mode
 
-## Environment Variables
+## Configuration
 
-Configure paths to SuperCollider executables if they're not in your system PATH:
+### Using .supercollider.yaml (Recommended)
+
+The recommended way to configure SuperCollider paths is using a `.supercollider.yaml` file. This configuration file is used by the underlying **supercolliderjs** library to locate SuperCollider executables and configure runtime behavior.
+
+#### Configuration File Location
+
+supercolliderjs searches for configuration in this order:
+1. `.supercollider.yaml` in the current directory
+2. `~/.supercollider.yaml` in your home directory
+3. Explicit path via `--config=/path/to/conf.yaml` flag
+
+**Recommendation**: Place `.supercollider.yaml` in your home directory (`~/.supercollider.yaml`) for global configuration across all projects.
+
+#### Minimal Configuration
+
+Create `~/.supercollider.yaml` with paths to your SuperCollider installation:
+
+```yaml
+# Minimal configuration - just specify binary locations
+sclang: /usr/local/bin/sclang
+scsynth: /usr/local/bin/scsynth
+```
+
+#### Full Configuration Options
+
+```yaml
+# SuperCollider binary paths
+sclang: /usr/local/bin/sclang
+scsynth: /usr/local/bin/scsynth
+sclang_conf: ~/Library/Application Support/SuperCollider/sclang_conf.yaml
+
+# Network configuration
+langPort: 57120        # sclang language port (default: 57120)
+serverPort: 57110      # scsynth server port (default: 57110)
+host: 127.0.0.1        # Connection host (default: 127.0.0.1)
+protocol: udp          # Communication protocol (default: udp)
+websocketPort: 4040    # WebSocket port for sclang (optional)
+
+# Compilation paths
+includePaths:          # Additional directories for compilation
+  - ~/SuperCollider/Extensions
+  - ~/Projects/MyQuarks
+excludePaths:          # Directories to exclude from compilation
+  - ~/SuperCollider/Extensions/Disabled
+
+# Behavior flags
+debug: false           # Enable debug output (default: false)
+echo: false            # Echo mode (default: false)
+stdin: false           # Standard input handling (default: false)
+postInlineWarnings: true  # Inline warnings (default: true)
+```
+
+#### Platform-Specific Defaults
+
+**macOS**:
+```yaml
+sclang: /Applications/SuperCollider/SuperCollider.app/Contents/MacOS/sclang
+scsynth: /Applications/SuperCollider/SuperCollider.app/Contents/MacOS/scsynth
+sclang_conf: ~/Library/Application Support/SuperCollider/sclang_conf.yaml
+```
+
+**Linux**:
+```yaml
+sclang: /usr/bin/sclang
+scsynth: /usr/bin/scsynth
+sclang_conf: ~/.config/SuperCollider/sclang_conf.yaml
+```
+
+**Windows**:
+```yaml
+sclang: C:\Program Files\SuperCollider\sclang.exe
+scsynth: C:\Program Files\SuperCollider\scsynth.exe
+sclang_conf: C:\Users\YourUsername\AppData\Local\SuperCollider\sclang_conf.yaml
+```
+
+#### Path Resolution
+
+- Tilde (`~`) expands to your home directory
+- Relative paths resolve to absolute paths
+- Both forward slashes (`/`) and backslashes (`\`) work on Windows
+
+#### Why Use .supercollider.yaml?
+
+1. **Centralized Configuration**: Single configuration file for all supercolliderjs-based tools
+2. **Project Flexibility**: Per-project configurations with directory-level `.supercollider.yaml`
+3. **Advanced Options**: Access to network ports, compilation paths, and behavior flags
+4. **Cross-Platform**: Works consistently across macOS, Linux, and Windows
+5. **No Environment Variables**: Cleaner than managing multiple environment variables
+
+### Environment Variables (Alternative)
+
+If you prefer environment variables or need to override `.supercollider.yaml` settings:
 
 - **`SCLANG_PATH`**: Path to sclang interpreter executable
   - **Default**: `sclang` (or `sclang.exe` on Windows)
@@ -373,7 +464,7 @@ $env:SCLANG_PATH="C:\Program Files\SuperCollider\sclang.exe"
 $env:SCSYNTH_PATH="C:\Program Files\SuperCollider\scsynth.exe"
 ```
 
-**Note**: scsynth path is passed to supercolliderjs which has its own auto-detection logic, while sclang is executed directly via shell commands requiring an explicit path.
+**Note**: Environment variables take precedence over `.supercollider.yaml` settings. For most users, `.supercollider.yaml` is the recommended approach.
 
 ## License
 
