@@ -3,8 +3,10 @@
  * Query status of running SuperCollider server
  */
 
-import type { CallToolResult, TextContent } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { SuperColliderClient } from '../supercollider/client.js';
+import { logger } from '../utils/logger.js';
+import { createSuccessResponse, createErrorResponse } from '../utils/responseHelpers.js';
 
 /**
  * Handler for get_server_status MCP tool
@@ -17,27 +19,15 @@ export async function getServerStatusHandler(
   scClient: SuperColliderClient
 ): Promise<CallToolResult> {
   try {
+    logger.info('get_server_status tool called');
     const status = await scClient.getStatus();
 
-    const content: TextContent = {
-      type: 'text',
-      text: JSON.stringify(status, null, 2),
-    };
-
-    return {
-      content: [content],
-    };
+    return createSuccessResponse('get_server_status', {
+      status,
+    });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    const content: TextContent = {
-      type: 'text',
-      text: `SuperCollider not available: ${errorMessage}`,
-    };
-
-    return {
-      content: [content],
-      isError: true,
-    };
+    return createErrorResponse('get_server_status', error, {
+      hint: 'Ensure scsynth is installed and accessible in PATH',
+    });
   }
 }

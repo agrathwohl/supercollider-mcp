@@ -4,10 +4,14 @@ Model Context Protocol (MCP) server for SuperCollider integration with Claude Co
 
 ## Features
 
-- **Server Discovery**: Automatically discovers running SuperCollider servers on common ports (57110, 57120)
-- **Server Management**: Boot and manage SuperCollider (scsynth) server processes
-- **Status Queries**: Query server status including CPU usage, synth count, and sample rate
-- **MCP Tools**: Provides `get_server_status` tool for Claude Code integration
+- **Server Lifecycle Management**: Boot, quit, reboot, and configure SuperCollider (scsynth) server
+- **Quark Package Management**: Install, remove, update, and list SuperCollider extension packages
+- **SynthDef Management**: Compile individual or batch SynthDef definitions
+- **Synth Control**: Create synth instances, control parameters, and free resources
+- **Group Management**: Create and manage hierarchical node groups
+- **Buffer Management**: Load audio files, record from JACK inputs/microphone, and manage buffer lifecycle
+- **Status Queries**: Real-time server status including CPU, synth count, sample rate, and UGen count
+- **Resource Allocation**: Automatic collision-free ID management for nodes, buffers, and buses
 
 ## Installation
 
@@ -54,9 +58,12 @@ await client.disconnect();
 
 ## MCP Tools
 
-### get_server_status
+This server provides 20 MCP tools organized into 6 categories:
 
-Query the status of the running SuperCollider server.
+### Server Lifecycle
+
+#### get_server_status
+Query real-time server status including CPU usage, synth count, and sample rate.
 
 **Parameters**: None
 
@@ -71,6 +78,228 @@ Query the status of the running SuperCollider server.
   "sampleRate": 48000
 }
 ```
+
+#### boot_server
+Boot SuperCollider server with optional custom configuration.
+
+**Parameters**:
+- `port` (number, optional): UDP port for OSC communication (default: 57110)
+- `sampleRate` (number, optional): Sample rate in Hz (default: 48000)
+- `numOutputBusChannels` (number, optional): Output audio channels (default: 8)
+- `numInputBusChannels` (number, optional): Input audio channels (default: 8)
+- `maxNodes` (number, optional): Maximum number of nodes (default: 1024)
+- `maxBuffers` (number, optional): Maximum number of buffers (default: 1024)
+- `device` (string, optional): Audio hardware device name
+
+**Example**:
+```json
+{
+  "port": 57120,
+  "sampleRate": 96000,
+  "numOutputBusChannels": 16,
+  "numInputBusChannels": 16
+}
+```
+
+#### quit_server
+Gracefully quit the SuperCollider server and reset all resource allocators.
+
+**Parameters**: None
+
+#### reboot_server
+Reboot SuperCollider server while preserving current configuration.
+
+**Parameters**: None
+
+#### configure_server
+Update server configuration options (requires reboot to take effect).
+
+**Parameters**: Same as `boot_server`
+
+**Note**: Changes are stored but require `reboot_server` to apply.
+
+### Quark Management
+
+#### install_quark
+Install a SuperCollider extension package (quark) by name.
+
+**Parameters**:
+- `quarkName` (string, required): Name of the quark to install
+
+**Example**: `{ "quarkName": "Vowel" }`
+
+#### remove_quark
+Uninstall a SuperCollider extension package.
+
+**Parameters**:
+- `quarkName` (string, required): Name of the quark to remove
+
+#### update_quark
+Update a quark to the latest version (use 'all' to update all quarks).
+
+**Parameters**:
+- `quarkName` (string, required): Name of quark to update or 'all'
+
+**Example**: `{ "quarkName": "all" }`
+
+#### list_quarks
+List all currently installed SuperCollider extension packages.
+
+**Parameters**: None
+
+**Returns**: Array of installed quark names
+
+### SynthDef Management
+
+#### compile_synthdef
+Compile a SuperCollider SynthDef from source code and load to server.
+
+**Parameters**:
+- `defName` (string, required): SynthDef name
+- `source` (string, required): SuperCollider SynthDef source code
+
+**Example**:
+```json
+{
+  "defName": "sine",
+  "source": "SynthDef(\\sine, { |out=0, freq=440, amp=0.1| Out.ar(out, SinOsc.ar(freq, 0, amp)) }).add;"
+}
+```
+
+#### compile_synthdefs_batch
+Compile multiple SynthDefs in a single operation for efficiency.
+
+**Parameters**:
+- `synthDefs` (array, required): Array of SynthDef objects with `name` and `source` fields
+
+**Example**:
+```json
+{
+  "synthDefs": [
+    { "name": "sine", "source": "SynthDef(...).add;" },
+    { "name": "saw", "source": "SynthDef(...).add;" }
+  ]
+}
+```
+
+### Synth Control
+
+#### create_synth
+Create a synth instance from a loaded SynthDef.
+
+**Parameters**:
+- `defName` (string, required): SynthDef name to instantiate
+- `addAction` (number, optional): Where to add synth (0=head, 1=tail, 2=before, 3=after, 4=replace, default: 1)
+- `targetId` (number, optional): Target group or node ID (default: 1)
+- `controls` (object, optional): Initial parameter values as key-value pairs
+
+**Example**:
+```json
+{
+  "defName": "sine",
+  "controls": { "freq": 880, "amp": 0.2 }
+}
+```
+
+**Returns**: `{ "nodeId": 1001 }` - Use this ID for parameter control and cleanup
+
+#### free_synth
+Free a synth instance by node ID.
+
+**Parameters**:
+- `nodeId` (number, required): Node ID returned from `create_synth`
+
+#### set_synth_controls
+Set parameter values on a running synth.
+
+**Parameters**:
+- `nodeId` (number, required): Target synth node ID
+- `controls` (object, required): Parameter key-value pairs to update
+
+**Example**:
+```json
+{
+  "nodeId": 1001,
+  "controls": { "freq": 660, "amp": 0.3 }
+}
+```
+
+### Group Management
+
+#### create_group
+Create a group node for hierarchical organization of synths.
+
+**Parameters**:
+- `addAction` (number, optional): Where to add group (0=head, 1=tail, 2=before, 3=after, default: 1)
+- `targetId` (number, optional): Target group ID to add to (default: 1)
+
+**Returns**: `{ "groupId": 2001 }` - Use this ID as target for synths
+
+**Usage**: Groups enable hierarchical control - freeing a group frees all child synths.
+
+#### free_group
+Free a group and all its child nodes recursively.
+
+**Parameters**:
+- `groupId` (number, required): Group node ID to free
+
+### Buffer Management
+
+#### load_audio_file
+Load an audio file from disk into a server buffer.
+
+**Parameters**:
+- `path` (string, required): Absolute path to audio file (WAV, AIFF, FLAC)
+- `startFrame` (number, optional): Starting frame in file (default: 0)
+- `numFrames` (number, optional): Number of frames to read (-1 = entire file, default: -1)
+
+**Returns**: `{ "bufferId": 10 }` - Use this ID for playback synths
+
+**Example**:
+```json
+{
+  "path": "/home/user/samples/kick.wav"
+}
+```
+
+#### record_jack_input
+Record audio from JACK input ports into a buffer.
+
+**Parameters**:
+- `duration` (number, required): Recording duration in seconds
+- `jackPorts` (array of strings, required): Array of JACK port names to record from
+- `channels` (number, optional): Number of channels to record (default: jackPorts.length)
+
+**Example**:
+```json
+{
+  "duration": 5.0,
+  "jackPorts": ["system:capture_1", "system:capture_2"]
+}
+```
+
+**Returns**: `{ "bufferId": 11 }` - Recording starts immediately, auto-stops after duration
+
+**Note**: Requires JACK audio system (Linux/macOS). Recording uses sclang-generated SynthDef with RecordBuf UGen.
+
+#### record_microphone
+Record audio from system default microphone (convenience wrapper).
+
+**Parameters**:
+- `duration` (number, required): Recording duration in seconds
+- `channels` (number, optional): Number of channels (default: 2 for stereo)
+
+**Example**: `{ "duration": 3.0, "channels": 1 }`
+
+**Auto-detects**: Uses `system:capture_1`, `system:capture_2`, etc. based on channel count
+
+#### free_buffer
+Free a buffer and deallocate its memory.
+
+**Parameters**:
+- `bufferId` (number, required): Buffer ID to free
+
+**Usage**: Always free buffers when done to prevent memory leaks
 
 ## Development
 
@@ -87,16 +316,64 @@ npm run dev
 
 ## Architecture
 
-- **Discovery Service**: TCP port scanning to find running SC servers
-- **Client**: Manages connection lifecycle and OSC communication via supercolliderjs
-- **MCP Server**: stdio transport for Claude Code integration
-- **Tools**: MCP tool handlers for server status queries
+### Core Components
+
+- **SuperColliderClient** (`src/supercollider/client.ts`): Manages scsynth server lifecycle, OSC communication via supercolliderjs, and resource allocators
+- **Resource Allocators** (`src/supercollider/allocators.ts`): Collision-free ID management for nodes (1024), buffers (1024), audio buses (128), control buses (16384)
+- **sclang Integration** (`src/supercollider/quarks.ts`): Child process execution for quark management and SynthDef compilation
+- **MCP Server** (`src/index.ts`): stdio transport with 20 tool handlers organized by category
+- **OSC Utilities** (`src/utils/osc.ts`): Type-safe OSC message builders for all server commands
+- **Error Handling** (`src/utils/errors.ts`): Custom error classes with error codes for robust error reporting
+
+### Tool Categories
+
+1. **Server Lifecycle** (5 tools): Boot, quit, reboot, configure, status
+2. **Quark Management** (4 tools): Install, remove, update, list packages
+3. **SynthDef Management** (2 tools): Compile single/batch definitions
+4. **Synth Control** (3 tools): Create, free, set parameters
+5. **Group Management** (2 tools): Create, free hierarchical groups
+6. **Buffer Management** (4 tools): Load files, record audio, free buffers
+
+### Resource Management
+
+All tools use automatic resource allocation:
+- **Node IDs**: Auto-assigned from NodeAllocator (range: 1000-2023)
+- **Buffer IDs**: Auto-assigned from BufferAllocator (range: 0-1023)
+- **Bus IDs**: Auto-assigned from AudioBusAllocator/ControlBusAllocator
+- **Auto-cleanup**: All allocators reset on server disconnect to prevent stale IDs
 
 ## Requirements
 
 - Node.js >= 18
-- SuperCollider (scsynth) installed on system
+- SuperCollider (scsynth and sclang) installed on system
 - Optional: Running SuperCollider server for discovery mode
+
+## Environment Variables
+
+Configure paths to SuperCollider executables if they're not in your system PATH:
+
+- **`SCLANG_PATH`**: Path to sclang interpreter executable
+  - **Default**: `sclang` (or `sclang.exe` on Windows)
+  - **When to set**: Non-standard installation location or multiple SC versions
+  - **Example**: `/usr/local/bin/sclang` or `/opt/supercollider-3.13/bin/sclang`
+
+- **`SCSYNTH_PATH`**: Path to scsynth audio server executable
+  - **Default**: Auto-detected by supercolliderjs library
+  - **When to set**: Auto-detection fails or specific version required
+  - **Example**: `/usr/local/bin/scsynth` or `/opt/supercollider-3.13/bin/scsynth`
+
+**Example configuration**:
+```bash
+# Linux/macOS
+export SCLANG_PATH=/usr/local/bin/sclang
+export SCSYNTH_PATH=/usr/local/bin/scsynth
+
+# Windows (PowerShell)
+$env:SCLANG_PATH="C:\Program Files\SuperCollider\sclang.exe"
+$env:SCSYNTH_PATH="C:\Program Files\SuperCollider\scsynth.exe"
+```
+
+**Note**: scsynth path is passed to supercolliderjs which has its own auto-detection logic, while sclang is executed directly via shell commands requiring an explicit path.
 
 ## License
 

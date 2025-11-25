@@ -5,9 +5,10 @@
 
 import sc from 'supercolliderjs';
 import * as msg from '@supercollider/server/lib/osc/msg.js';
-import type { ConnectionState, SuperColliderStatus, OSCStatusReplyArray } from './types.js';
+import type { ConnectionState, SuperColliderStatus, OSCStatusReplyArray, ServerOptions } from './types.js';
 import { logger } from '../utils/logger.js';
 import { SuperColliderError, SC_CONNECTION_FAILED, SC_NOT_FOUND, SC_INVALID_RESPONSE } from '../utils/errors.js';
+import { NodeAllocator, BufferAllocator, AudioBusAllocator, ControlBusAllocator } from './allocators.js';
 
 /**
  * Client options for SuperCollider connection
@@ -29,6 +30,16 @@ export class SuperColliderClient {
   private connectionState: ConnectionState = 'disconnected';
   private scServer: any = null; // supercolliderjs Server instance
   private options: ClientOptions;
+  private serverOptions: ServerOptions = {};
+
+  // Resource allocators for collision-free ID management
+  private nodeAllocator: NodeAllocator;
+  private bufferAllocator: BufferAllocator;
+  private audioBusAllocator: AudioBusAllocator;
+  private controlBusAllocator: ControlBusAllocator;
+
+  // Sync ID counter for unique /sync message IDs
+  private nextSyncId: number = 0;
 
   constructor(options: ClientOptions = {}) {
     this.options = {
@@ -36,6 +47,12 @@ export class SuperColliderClient {
       debug: false,
       ...options,
     };
+
+    // Initialize allocators with default limits
+    this.nodeAllocator = new NodeAllocator(1024);
+    this.bufferAllocator = new BufferAllocator(1024);
+    this.audioBusAllocator = new AudioBusAllocator(8, 128);
+    this.controlBusAllocator = new ControlBusAllocator(16384);
   }
 
   /**
@@ -50,6 +67,60 @@ export class SuperColliderClient {
    */
   getServer(): any {
     return this.scServer;
+  }
+
+  /**
+   * Get current server options
+   */
+  getServerOptions(): ServerOptions {
+    return { ...this.serverOptions };
+  }
+
+  /**
+   * Set server options (will require reboot to take effect)
+   */
+  setServerOptions(options: ServerOptions): void {
+    this.serverOptions = { ...this.serverOptions, ...options };
+  }
+
+  /**
+   * Get node allocator
+   */
+  getNodeAllocator(): NodeAllocator {
+    return this.nodeAllocator;
+  }
+
+  /**
+   * Get buffer allocator
+   */
+  getBufferAllocator(): BufferAllocator {
+    return this.bufferAllocator;
+  }
+
+  /**
+   * Get audio bus allocator
+   */
+  getAudioBusAllocator(): AudioBusAllocator {
+    return this.audioBusAllocator;
+  }
+
+  /**
+   * Get control bus allocator
+   */
+  getControlBusAllocator(): ControlBusAllocator {
+    return this.controlBusAllocator;
+  }
+
+  /**
+   * Reset all allocators to initial state
+   * Called automatically on disconnect to prevent stale resource IDs
+   */
+  private resetAllocators(): void {
+    logger.debug('Resetting all resource allocators');
+    this.nodeAllocator.reset();
+    this.bufferAllocator.reset();
+    this.audioBusAllocator.reset();
+    this.controlBusAllocator.reset();
   }
 
   /**
@@ -159,10 +230,18 @@ export class SuperColliderClient {
       }
 
       this.setState('disconnected');
+
+      // Reset all allocators on disconnect to prevent stale resource IDs
+      this.resetAllocators();
+
       logger.info('SuperCollider server disconnected');
     } catch (error) {
       logger.error('Error during disconnect:', error);
       this.setState('error');
+
+      // Still reset allocators even if disconnect had errors
+      this.resetAllocators();
+
       throw new SuperColliderError(
         'Failed to disconnect from SuperCollider',
         SC_CONNECTION_FAILED,
@@ -222,5 +301,99 @@ export class SuperColliderClient {
         error instanceof Error ? error : undefined
       );
     }
+  }
+
+  /**
+   * Get server sample rate
+   * Convenience wrapper around getStatus() for common use case
+   *
+   * @returns Sample rate in Hz (e.g., 44100, 48000, 96000)
+   * @throws {SuperColliderError} If server status query fails or sample rate unavailable
+   */
+  async getSampleRate(): Promise<number> {
+    const status = await this.getStatus();
+    if (status.sampleRate === undefined) {
+      throw new SuperColliderError(
+        'Sample rate not available from server status',
+        SC_INVALID_RESPONSE
+      );
+    }
+    return status.sampleRate;
+  }
+
+  /**
+   * Send one-way OSC message to server (no response expected)
+   * Auto-connects if not already connected
+   *
+   * @param oscMessage - OSC message array (e.g., ['/d_recv', data])
+   */
+  async sendOscMessage(oscMessage: unknown[]): Promise<void> {
+    // Auto-connect if needed
+    if (this.connectionState !== 'connected') {
+      await this.connect();
+    }
+
+    if (!this.scServer) {
+      throw new SuperColliderError('Server not available', SC_CONNECTION_FAILED);
+    }
+
+    try {
+      logger.debug(`Sending OSC message: ${oscMessage[0]}`);
+      await this.scServer.send.msg(oscMessage);
+    } catch (error) {
+      logger.error('Failed to send OSC message:', error);
+      throw new SuperColliderError(
+        'Failed to send OSC message to server',
+        SC_CONNECTION_FAILED,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Synchronize with server
+   * Waits for server to process all pending asynchronous commands
+   * Useful for batch operations: send multiple commands, then sync once
+   *
+   * @returns Promise that resolves when server confirms synchronization
+   */
+  async syncServer(): Promise<void> {
+    // Auto-connect if needed
+    if (this.connectionState !== 'connected') {
+      await this.connect();
+    }
+
+    if (!this.scServer) {
+      throw new SuperColliderError('Server not available', SC_CONNECTION_FAILED);
+    }
+
+    try {
+      const syncId = this.nextSyncId++;
+      logger.debug(`Syncing server with ID: ${syncId}`);
+      await this.scServer.callAndResponse(msg.sync(syncId));
+      logger.debug(`Server synchronized (ID: ${syncId})`);
+    } catch (error) {
+      logger.error('Failed to sync with server:', error);
+      throw new SuperColliderError(
+        'Server synchronization failed',
+        SC_CONNECTION_FAILED,
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
+   * Send OSC message and wait for server synchronization
+   * Uses /sync mechanism to ensure server has processed the message
+   * Auto-connects if not already connected
+   *
+   * @param oscMessage - OSC message array (e.g., ['/d_recv', data])
+   */
+  async sendOscMessageWithSync(oscMessage: unknown[]): Promise<void> {
+    // Reuse sendOscMessage for consistency (handles connection, validation, errors)
+    await this.sendOscMessage(oscMessage);
+
+    // Add synchronization mechanism
+    await this.syncServer();
   }
 }
