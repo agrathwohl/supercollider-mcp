@@ -319,3 +319,123 @@ export interface ResourceAllocatorInterface {
    */
   getAllocatedIds(): number[];
 }
+
+/**
+ * Pdef (Pattern Definition) metadata
+ * Pdefs are named patterns in SuperCollider's JITlib system
+ */
+export interface PdefInfo {
+  /** Pattern name (unique identifier) */
+  name: string;
+
+  /** Whether pattern is currently playing */
+  isPlaying: boolean;
+
+  /** Pattern source code (SuperCollider event pattern) */
+  source?: string;
+
+  /** Current parameter values */
+  parameters?: Record<string, number | string>;
+
+  /** Quant value for pattern scheduling synchronization */
+  quant?: number;
+
+  /** Creation timestamp */
+  createdAt?: Date;
+
+  /** Last modification timestamp */
+  modifiedAt?: Date;
+}
+
+/**
+ * Tdef (Task Definition) metadata
+ * Tdefs are named tasks (routines) in SuperCollider's JITlib system
+ */
+export interface TdefInfo {
+  /** Task name (unique identifier) */
+  name: string;
+
+  /** Whether task is currently running */
+  isRunning: boolean;
+
+  /** Task source code (SuperCollider routine/function) */
+  source?: string;
+
+  /** Quant value for task scheduling synchronization */
+  quant?: number;
+
+  /** Creation timestamp */
+  createdAt?: Date;
+
+  /** Last modification timestamp */
+  modifiedAt?: Date;
+}
+
+/**
+ * Pattern status query response
+ * Provides comprehensive state information for a pattern
+ */
+export interface PatternStatus {
+  /** Pattern name */
+  name: string;
+
+  /** Pattern type (Pdef or Tdef) */
+  type: 'pdef' | 'tdef';
+
+  /** Whether pattern/task is currently playing/running */
+  isActive: boolean;
+
+  /** Current parameter values (for Pdefs) */
+  parameters?: Record<string, number | string>;
+
+  /** Pattern source code */
+  source?: string;
+
+  /** Quant value */
+  quant?: number;
+
+  /** Additional metadata from sclang */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Pattern parameter update specification
+ * Used for modifying running patterns without stopping playback
+ */
+export interface PatternParams {
+  /** Pattern name to modify */
+  name: string;
+
+  /** Pattern type (Pdef or Tdef) */
+  type?: 'pdef' | 'tdef';
+
+  /** Parameter key-value pairs to update */
+  params: Record<string, number | string>;
+
+  /** Whether to apply changes immediately or on next cycle */
+  immediate?: boolean;
+}
+
+/**
+ * sclang client configuration options
+ * Used for initializing connection to sclang interpreter
+ */
+export interface SclangClientOptions {
+  /** Path to sclang executable (auto-detected if not specified) */
+  sclangPath?: string;
+
+  /** Port for OSC communication with sclang (default: 57120) */
+  port?: number;
+
+  /** Connection timeout in milliseconds (default: 5000) */
+  connectionTimeout?: number;
+
+  /** Whether to auto-connect on client instantiation (default: false) */
+  autoConnect?: boolean;
+
+  /** Whether to verify JITlib is loaded on connection (default: true) */
+  verifyJITlib?: boolean;
+
+  /** Additional sclang startup arguments */
+  sclangArgs?: string[];
+}

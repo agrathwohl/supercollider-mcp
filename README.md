@@ -10,6 +10,7 @@ Model Context Protocol (MCP) server for SuperCollider integration with Claude Co
 - **Synth Control**: Create synth instances, control parameters, and free resources
 - **Group Management**: Create and manage hierarchical node groups
 - **Buffer Management**: Load audio files, record from JACK inputs/microphone, and manage buffer lifecycle
+- **Pattern Support (JITlib)**: Create, modify, control, and query Pdef (event patterns) and Tdef (task patterns) via sclang interpreter
 - **Status Queries**: Real-time server status including CPU, synth count, sample rate, and UGen count
 - **Resource Allocation**: Automatic collision-free ID management for nodes, buffers, and buses
 
@@ -58,7 +59,7 @@ await client.disconnect();
 
 ## MCP Tools
 
-This server provides 20 MCP tools organized into 6 categories:
+This server provides 26 MCP tools organized into 7 categories:
 
 ### Server Lifecycle
 
@@ -301,6 +302,134 @@ Free a buffer and deallocate its memory.
 
 **Usage**: Always free buffers when done to prevent memory leaks
 
+### Pattern Support (JITlib)
+
+JITlib pattern support enables AI-powered control of SuperCollider's Just-In-Time composition system through the sclang interpreter. Create and manipulate Pdef (event patterns) and Tdef (task patterns) for live coding and algorithmic composition.
+
+#### create_pdef
+Create a new Pdef (Pattern Definition) for event pattern sequencing.
+
+**Parameters**:
+- `name` (string, required): Pattern name (unique identifier)
+- `pattern` (string, required): SuperCollider pattern code
+- `quant` (number, optional): Quant value for pattern scheduling synchronization
+
+**Example**:
+```json
+{
+  "name": "melody",
+  "pattern": "Pbind(\\freq, Pseq([440, 550, 660, 880], inf), \\dur, 0.25)",
+  "quant": 4
+}
+```
+
+**Returns**: `{ "success": true, "pdef": { "name": "melody", "isPlaying": false } }`
+
+**Note**: Patterns created with `create_pdef` are not automatically played. Use `control_pattern` with action "play" to start playback.
+
+#### create_tdef
+Create a new Tdef (Task Definition) for procedural task sequencing.
+
+**Parameters**:
+- `name` (string, required): Task name (unique identifier)
+- `task` (string, required): SuperCollider task code (function/routine)
+- `quant` (number, optional): Quant value for task scheduling synchronization
+
+**Example**:
+```json
+{
+  "name": "chords",
+  "task": "{ loop { [60, 64, 67].midicps.do { |freq| Synth(\\sine, [\\freq, freq]) }; 1.wait } }",
+  "quant": 4
+}
+```
+
+**Returns**: `{ "success": true, "tdef": { "name": "chords", "isRunning": false } }`
+
+#### modify_pattern
+Modify an existing pattern (Pdef or Tdef) while preserving its playing state.
+
+**Parameters**:
+- `name` (string, required): Pattern or task name to modify
+- `type` (string, required): Pattern type - "pdef" or "tdef"
+- `code` (string, required): New pattern or task code
+
+**Example**:
+```json
+{
+  "name": "melody",
+  "type": "pdef",
+  "code": "Pbind(\\freq, Pseq([330, 440, 550], inf), \\dur, 0.5)"
+}
+```
+
+**Usage**: Modifications take effect immediately. For playing patterns, changes apply on the next cycle.
+
+#### get_pattern_status
+Query the current status of a pattern (Pdef or Tdef).
+
+**Parameters**:
+- `name` (string, required): Pattern or task name to query
+- `type` (string, optional): Pattern type - "pdef" or "tdef" (auto-detects if not specified)
+
+**Example**: `{ "name": "melody" }`
+
+**Returns**:
+```json
+{
+  "success": true,
+  "status": {
+    "name": "melody",
+    "isPlaying": true,
+    "quant": 4
+  }
+}
+```
+
+#### control_pattern
+Control pattern playback (play, stop, pause).
+
+**Parameters**:
+- `name` (string, required): Pattern name to control
+- `action` (string, required): Control action - "play", "stop", or "pause"
+  - **play**: Start pattern playback
+  - **stop**: Stop and reset pattern to beginning
+  - **pause**: Pause without resetting position
+
+**Example**:
+```json
+{
+  "name": "melody",
+  "action": "play"
+}
+```
+
+**Usage**: Use with Pdefs only (Tdefs use similar but not identical semantics).
+
+#### list_active_patterns
+List all active patterns (Pdefs and Tdefs) currently defined in sclang.
+
+**Parameters**: None
+
+**Returns**:
+```json
+{
+  "success": true,
+  "count": 2,
+  "patterns": [
+    { "type": "pdef", "name": "melody", "isActive": true, "quant": 4 },
+    { "type": "tdef", "name": "chords", "isActive": false, "quant": 4 }
+  ]
+}
+```
+
+**Usage**: Query this to understand the current state of all defined patterns before making changes.
+
+**Pattern Support Requirements**:
+- SuperCollider sclang interpreter must be installed
+- JITlib must be loaded in sclang environment (verified automatically on connection)
+- `SCLANG_PATH` environment variable or `.supercollider.yaml` configuration required
+
 ## Development
 
 ```bash
@@ -319,9 +448,11 @@ npm run dev
 ### Core Components
 
 - **SuperColliderClient** (`src/supercollider/client.ts`): Manages scsynth server lifecycle, OSC communication via supercolliderjs, and resource allocators
+- **SclangClient** (`src/supercollider/sclangClient.ts`): Manages sclang interpreter connection, JITlib verification, and pattern operations (Pdef/Tdef)
 - **Resource Allocators** (`src/supercollider/allocators.ts`): Collision-free ID management for nodes (1024), buffers (1024), audio buses (128), control buses (16384)
 - **sclang Integration** (`src/supercollider/quarks.ts`): Child process execution for quark management and SynthDef compilation
-- **MCP Server** (`src/index.ts`): stdio transport with 20 tool handlers organized by category
+- **Pattern Tools** (`src/tools/patternTools.ts`): MCP tool handlers for JITlib pattern operations with Zod validation
+- **MCP Server** (`src/index.ts`): stdio transport with 26 tool handlers organized by category
 - **OSC Utilities** (`src/utils/osc.ts`): Type-safe OSC message builders for all server commands
 - **Error Handling** (`src/utils/errors.ts`): Custom error classes with error codes for robust error reporting
 
@@ -333,6 +464,7 @@ npm run dev
 4. **Synth Control** (3 tools): Create, free, set parameters
 5. **Group Management** (2 tools): Create, free hierarchical groups
 6. **Buffer Management** (4 tools): Load files, record audio, free buffers
+7. **Pattern Support** (6 tools): Create, modify, control, query Pdefs and Tdefs
 
 ### Resource Management
 

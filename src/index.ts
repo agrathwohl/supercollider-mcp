@@ -14,6 +14,7 @@ import {
 import { z } from "zod";
 
 import { SuperColliderClient } from "./supercollider/client.js";
+import { SclangClient } from "./supercollider/sclangClient.js";
 import { killAllSclangProcesses } from "./supercollider/quarks.js";
 import { getScsynthPath } from "./utils/paths.js";
 import { getServerStatusHandler } from "./tools/getServerStatus.js";
@@ -48,6 +49,20 @@ import {
   recordMicrophoneHandler,
   freeBufferHandler,
 } from "./tools/bufferTools.js";
+import {
+  createPdefHandler,
+  createTdefHandler,
+  modifyPatternHandler,
+  getPatternStatusHandler,
+  controlPatternHandler,
+  listActivePatternsHandler,
+  CreatePdefSchema,
+  CreateTdefSchema,
+  ModifyPatternSchema,
+  GetPatternStatusSchema,
+  ControlPatternSchema,
+  ListActivePatternsSchema,
+} from "./tools/patternTools.js";
 import { logger } from "./utils/logger.js";
 
 /**
@@ -71,6 +86,15 @@ const server = new Server(
  */
 const scClient = new SuperColliderClient({
   scsynth: getScsynthPath(),
+});
+
+/**
+ * Sclang client instance
+ * sclang path from SCLANG_PATH environment variable or auto-detected by supercolliderjs
+ */
+const sclangClient = new SclangClient({
+  sclangPath: process.env.SCLANG_PATH,
+  autoConnect: false,
 });
 
 /**
@@ -423,6 +447,77 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["bufferId"],
         },
       },
+      {
+        name: "create_pdef",
+        description: "Create a new Pdef pattern",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Pattern name (unique identifier)" },
+            pattern: { type: "string", description: "SuperCollider pattern code (e.g., \"Pbind(\\\\freq, 440, \\\\dur, 0.5)\")" },
+            quant: { type: "number", description: "Optional quant value for pattern scheduling synchronization" },
+          },
+          required: ["name", "pattern"],
+        },
+      },
+      {
+        name: "create_tdef",
+        description: "Create a new Tdef task",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Task name (unique identifier)" },
+            task: { type: "string", description: "SuperCollider task code (function/routine)" },
+            quant: { type: "number", description: "Optional quant value for task scheduling synchronization" },
+          },
+          required: ["name", "task"],
+        },
+      },
+      {
+        name: "modify_pattern",
+        description: "Modify an existing pattern (Pdef or Tdef)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Pattern or task name to modify" },
+            type: { type: "string", enum: ["pdef", "tdef"], description: "Pattern type (pdef or tdef)" },
+            code: { type: "string", description: "New pattern or task code" },
+          },
+          required: ["name", "type", "code"],
+        },
+      },
+      {
+        name: "get_pattern_status",
+        description: "Get status of a pattern (Pdef or Tdef)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Pattern or task name to query" },
+            type: { type: "string", enum: ["pdef", "tdef"], description: "Pattern type (pdef or tdef), auto-detects if not specified" },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "control_pattern",
+        description: "Control a pattern (play, stop, pause)",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Pattern name to control" },
+            action: { type: "string", enum: ["play", "stop", "pause"], description: "Control action: play (start pattern), stop (stop and reset), pause (pause without reset)" },
+          },
+          required: ["name", "action"],
+        },
+      },
+      {
+        name: "list_active_patterns",
+        description: "List all active patterns (Pdefs and Tdefs)",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -534,6 +629,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return await freeBufferHandler(scClient, bufferId);
     }
 
+    case "create_pdef": {
+      const parsedArgs = CreatePdefSchema.parse(args);
+      return await createPdefHandler(sclangClient, parsedArgs);
+    }
+
+    case "create_tdef": {
+      const parsedArgs = CreateTdefSchema.parse(args);
+      return await createTdefHandler(sclangClient, parsedArgs);
+    }
+
+    case "modify_pattern": {
+      const parsedArgs = ModifyPatternSchema.parse(args);
+      return await modifyPatternHandler(sclangClient, parsedArgs);
+    }
+
+    case "get_pattern_status": {
+      const parsedArgs = GetPatternStatusSchema.parse(args);
+      return await getPatternStatusHandler(sclangClient, parsedArgs);
+    }
+
+    case "control_pattern": {
+      const parsedArgs = ControlPatternSchema.parse(args);
+      return await controlPatternHandler(sclangClient, parsedArgs);
+    }
+
+    case "list_active_patterns": {
+      const parsedArgs = ListActivePatternsSchema.parse(args);
+      return await listActivePatternsHandler(sclangClient, parsedArgs);
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -561,6 +686,11 @@ process.on("SIGINT", async () => {
   logger.info("Shutting down SuperCollider MCP server...");
 
   try {
+    // Disconnect sclang if connected
+    if (sclangClient.isConnected()) {
+      await sclangClient.disconnect();
+    }
+
     // Kill any orphaned sclang processes (now awaits completion)
     await killAllSclangProcesses();
 
@@ -582,6 +712,11 @@ process.on("SIGTERM", async () => {
   logger.info("Received SIGTERM, shutting down...");
 
   try {
+    // Disconnect sclang if connected
+    if (sclangClient.isConnected()) {
+      await sclangClient.disconnect();
+    }
+
     await killAllSclangProcesses();
 
     if (scClient.getConnectionState() === "connected") {

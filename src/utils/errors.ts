@@ -49,3 +49,21 @@ export const SC_QUARK_ERROR = 'SC_QUARK_ERROR';
 
 /** Buffer operation failed (allocation, loading, or recording) */
 export const SC_BUFFER_ERROR = 'SC_BUFFER_ERROR';
+
+/** sclang interpreter executable not found in PATH or SCLANG_PATH */
+export const SCLANG_NOT_FOUND = 'SCLANG_NOT_FOUND';
+
+/** sclang interpreter not connected or connection lost */
+export const SCLANG_NOT_CONNECTED = 'SCLANG_NOT_CONNECTED';
+
+/** sclang code execution failed (syntax error, runtime error, or evaluation failure) */
+export const SCLANG_EXECUTION_ERROR = 'SCLANG_EXECUTION_ERROR';
+
+/** Pattern with given name not found in sclang environment */
+export const SCLANG_PATTERN_NOT_FOUND = 'SCLANG_PATTERN_NOT_FOUND';
+
+/** JITlib library not loaded in sclang interpreter */
+export const SCLANG_JITLIB_NOT_LOADED = 'SCLANG_JITLIB_NOT_LOADED';
+
+/** sclang operation timed out */
+export const SCLANG_TIMEOUT = 'SCLANG_TIMEOUT';
